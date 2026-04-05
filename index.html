@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Airbnb Revenue Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0c0e14;--bg2:#13161f;--bg3:#1a1f2c;--bg4:#222840;
+  --bdr:#252d40;--bdr2:#334060;
+  --gold:#c8a44a;--gold2:#e4c068;--gold3:#f5e4b0;
+  --blu:#4a8fd4;--blu2:#7ab0ec;
+  --grn:#3da868;--grn2:#5cc882;
+  --red:#d9503c;--amb:#d49030;
+  --txt:#d8e0f0;--txt2:#8090b0;--txt3:#505878;
+  --mono:'DM Mono',monospace;--serif:'Fraunces',serif;--sans:'DM Sans',sans-serif;
+  --r:8px;--r2:12px;
+}
+html,body{height:100%;background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:14px;line-height:1.6}
+
+/* ── Layout ── */
+.shell{display:grid;grid-template-rows:54px 1fr;height:100vh;overflow:hidden}
+header{display:flex;align-items:center;gap:14px;padding:0 22px;background:var(--bg2);border-bottom:1px solid var(--bdr);flex-shrink:0}
+.logo{font-family:var(--serif);font-size:17px;color:var(--gold2);white-space:nowrap}
+.logo em{color:var(--txt3);font-style:normal;font-size:12px;font-weight:300}
+.hr-sep{height:18px;width:1px;background:var(--bdr);flex-shrink:0}
+.key-pill{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:20px;cursor:default;white-space:nowrap;transition:all .2s}
+.key-live{background:#0d2a1a;border:1px solid #1d5a30;color:var(--grn)}
+.key-default{background:#2a2010;border:1px solid #5a4018;color:var(--amb)}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+.body{display:grid;grid-template-columns:360px 1fr;overflow:hidden;height:100%}
+.panel-left{display:flex;flex-direction:column;border-right:1px solid var(--bdr);overflow:hidden}
+.panel-right{display:flex;flex-direction:column;overflow:hidden}
+
+/* ── Scrollable left content ── */
+.left-scroll{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.left-scroll::-webkit-scrollbar{width:4px}.left-scroll::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px}
+
+/* ── Cards ── */
+.card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:14px 16px}
+.card-hd{font-size:10px;font-weight:500;color:var(--gold);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
+
+/* ── Buttons ── */
+button{cursor:pointer;font-family:var(--sans);transition:all .14s;outline:none}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 16px;border-radius:var(--r);border:none;font-size:13px;font-weight:500;white-space:nowrap}
+.btn-primary{background:var(--gold);color:#0c0e14}.btn-primary:hover:not(:disabled){background:var(--gold2)}
+.btn-primary:disabled{background:var(--bg4);color:var(--txt3);cursor:not-allowed}
+.btn-ghost{background:transparent;color:var(--txt2);border:1px solid var(--bdr)}.btn-ghost:hover:not(:disabled){background:var(--bg3);border-color:var(--bdr2);color:var(--txt)}
+.btn-ghost:disabled{opacity:.4;cursor:not-allowed}
+.btn-green{background:#0d2a1a;color:var(--grn);border:1px solid #1d5a30}.btn-green:hover{background:#1d4a28}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-full{width:100%}
+.btn-row{display:flex;gap:8px}
+
+/* ── Inputs ── */
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:10px;font-weight:500;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em}
+input,select{background:var(--bg3);border:1px solid var(--bdr);border-radius:var(--r);color:var(--txt);font-family:var(--sans);font-size:13px;padding:8px 11px;outline:none;width:100%;transition:border .14s}
+input:focus,select:focus{border-color:var(--gold)}
+input::placeholder{color:var(--txt3)}
+select option{background:var(--bg3)}
+.url-row{position:relative}
+.url-row input{padding-right:32px}
+.url-x{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--txt3);font-size:16px;padding:0 3px;cursor:pointer}.url-x:hover{color:var(--txt)}
+.params-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+
+/* ── Listing card ── */
+.listing-card{animation:slideUp .25s ease both}
+.l-name{font-family:var(--serif);font-size:16px;color:var(--gold3);line-height:1.3;margin-bottom:6px}
+.tag-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px}
+.tag{font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;border:1px solid}
+.tag-type{border-color:#204060;background:#0d2030;color:var(--blu2)}
+.tag-spec{border-color:var(--bdr);background:var(--bg3);color:var(--txt2)}
+.tag-sh{border-color:#503a10;background:#2a1e08;color:var(--amb)}
+.tag-badge{border-color:#1a4030;background:#0d2418;color:var(--grn)}
+.rating-row{display:flex;align-items:baseline;gap:8px;margin-top:6px}
+.r-big{font-family:var(--serif);font-size:20px;color:var(--gold2)}
+.r-sub{font-size:12px;color:var(--txt3)}
+.coords{font-family:var(--mono);font-size:11px;color:var(--txt3);margin-top:5px}
+.warn-note{margin-top:8px;padding:6px 10px;background:#2a1e08;border:1px solid #503a10;border-radius:6px;font-size:11px;color:var(--amb)}
+
+/* ── Progress / Log ── */
+.prog-bar{height:3px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-bottom:8px}
+.prog-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,var(--gold),var(--gold2));transition:width .4s ease}
+.stage-track{display:flex;gap:3px;margin-bottom:8px;flex-wrap:wrap}
+.stage-dot{height:4px;flex:1;background:var(--bg4);border-radius:2px;transition:background .3s}
+.stage-dot.done{background:var(--grn)}
+.stage-dot.active{background:var(--gold);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.log-box{background:var(--bg);border:1px solid var(--bdr);border-radius:var(--r);font-family:var(--mono);font-size:11px;padding:10px 12px;max-height:180px;overflow-y:auto;line-height:1.65}
+.log-box::-webkit-scrollbar{width:3px}.log-box::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:2px}
+.ll{display:block}.ll.done{color:var(--grn)}.ll.err{color:var(--red)}.ll.info{color:var(--blu2)}.ll.warn{color:var(--amb)}
+
+/* ── Spinner ── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{width:13px;height:13px;border:2px solid var(--bdr);border-top-color:var(--gold);border-radius:50%;animation:spin .65s linear infinite;display:inline-block;flex-shrink:0}
+
+/* ── Status banner ── */
+.status-bar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:var(--r);font-size:12px;font-weight:500;margin-bottom:4px}
+.status-running{background:#1a2010;border:1px solid #3a5020;color:var(--grn)}
+.status-done{background:#0d2010;border:1px solid #1d6030;color:var(--grn2)}
+.status-error{background:#2a100c;border:1px solid #5a2018;color:var(--red)}
+.status-idle{display:none}
+
+/* ── Right: tabs ── */
+.tab-bar{display:flex;gap:2px;padding:0 22px;border-bottom:1px solid var(--bdr);background:var(--bg2);flex-shrink:0;overflow-x:auto}
+.tab-bar::-webkit-scrollbar{height:0}
+.tab{background:none;border:none;color:var(--txt3);font-family:var(--sans);font-size:13px;padding:13px 16px;border-bottom:2.5px solid transparent;cursor:pointer;transition:all .13s;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tab:hover{color:var(--txt)}.tab.on{color:var(--gold2);border-bottom-color:var(--gold)}
+.tab .badge{font-size:10px;background:var(--bg4);color:var(--txt3);padding:1px 6px;border-radius:10px}
+.tab-body{flex:1;overflow-y:auto;padding:22px}
+.tab-body::-webkit-scrollbar{width:5px}.tab-body::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
+.pane{display:none;animation:slideUp .2s ease both}.pane.on{display:block}
+
+/* ── Empty state ── */
+.empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:10px;color:var(--txt3)}
+.empty-icon{font-size:42px;opacity:.25}
+.empty-label{font-size:14px}
+.empty-sub{font-size:12px;color:var(--txt3);opacity:.6}
+
+/* ── Stats row ── */
+.stat-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-bottom:18px}
+.stat{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:13px 15px}
+.stat-lbl{font-size:10px;color:var(--txt3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:3px}
+.stat-val{font-family:var(--serif);font-size:22px;line-height:1;color:var(--gold2)}
+.stat-val.g{color:var(--grn)}.stat-val.b{color:var(--blu2)}.stat-val.r{color:var(--red)}.stat-val.a{color:var(--amb)}
+.stat-sub{font-size:11px;color:var(--txt3);margin-top:2px}
+
+/* ── Position banner ── */
+.pos-banner{border-radius:var(--r);padding:12px 16px;margin-bottom:18px;border:1px solid;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.pos-under{background:#1a1a08;border-color:#4a4018}.pos-over{background:#1a0808;border-color:#4a1818}.pos-ok{background:#081a10;border-color:#184a28}
+.pos-label{font-family:var(--serif);font-size:18px;font-weight:600}
+.pos-pct{font-size:28px;font-family:var(--mono);font-weight:300}
+.pos-reason{font-size:12px;color:var(--txt2);flex:1;min-width:0}
+
+/* ── Month cards ── */
+.month-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:18px}
+.month-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:14px}
+.mc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.mc-name{font-family:var(--serif);font-size:15px;color:var(--gold2)}
+.season-peak{color:var(--amb)}.season-high{color:var(--grn)}.season-medium{color:var(--blu2)}.season-low{color:var(--txt3)}
+.rate-tbl{width:100%;border-collapse:collapse;font-size:12px}
+.rate-tbl td{padding:3px 0;border-bottom:1px solid var(--bdr)}
+.rate-tbl tr:last-child td{border:none}
+.rate-tbl .lbl{color:var(--txt3)}.rate-tbl .val{text-align:right;font-family:var(--mono);font-weight:500;color:var(--txt)}
+.rate-tbl .val.hi{color:var(--amb)}.rate-tbl .val.lo{color:var(--txt3)}
+.mc-footer{margin-top:8px;font-size:11px;color:var(--txt3);display:flex;gap:10px;flex-wrap:wrap}
+
+/* ── Opportunities ── */
+.opp-list{display:flex;flex-direction:column;gap:7px;margin-bottom:18px}
+.opp{display:flex;gap:10px;padding:10px 14px;background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);align-items:flex-start}
+.opp-p{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;text-transform:uppercase;flex-shrink:0;margin-top:1px}
+.p-high{background:#2a1008;border:1px solid #5a2010;color:var(--red)}
+.p-medium{background:#2a1e08;border:1px solid #5a4018;color:var(--amb)}
+.p-low{background:var(--bg4);border:1px solid var(--bdr);color:var(--txt3)}
+.opp-txt{font-size:13px;color:var(--txt);line-height:1.5}
+
+/* ── Download row ── */
+.dl-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:20px}
+
+/* ── Price recommendations ── */
+.price-rec-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:18px}
+.pr-card{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r);padding:10px 12px;text-align:center}
+.pr-lbl{font-size:10px;color:var(--txt3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.pr-val{font-family:var(--mono);font-size:18px;font-weight:500;color:var(--gold2)}
+
+/* ── Table ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:7px 11px;color:var(--txt3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;border-bottom:1px solid var(--bdr);position:sticky;top:0;background:var(--bg);font-weight:500}
+td{padding:8px 11px;border-bottom:1px solid var(--bdr);color:var(--txt2);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg2)}
+.nm{font-family:var(--mono)}.td-direct{color:var(--grn)}.td-secondary{color:var(--blu2)}.td-context{color:var(--txt3)}
+a{color:inherit;text-decoration:none}a:hover{color:var(--gold2)}
+
+/* ── Calendar ── */
+.cal-legend{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;font-size:11px;color:var(--txt3)}
+.leg{display:flex;align-items:center;gap:5px}
+.leg-dot{width:10px;height:10px;border-radius:2px}
+.cal-month{margin-bottom:24px}
+.cal-month-name{font-family:var(--serif);font-size:15px;color:var(--gold3);margin-bottom:8px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;min-width:490px}
+.cal-hd{text-align:center;font-size:10px;color:var(--txt3);padding:4px 2px;font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+.cal-day{border-radius:5px;padding:5px 7px;border:1px solid var(--bdr);min-height:58px;cursor:default;transition:transform .1s}
+.cal-day:hover{transform:scale(1.04);z-index:1;position:relative}
+.cal-day.empty{background:transparent;border-color:transparent;min-height:0}
+.day-n{font-size:10px;color:var(--txt3);margin-bottom:2px}
+.day-p{font-family:var(--mono);font-size:13px;font-weight:500}
+.day-t{font-size:9px;text-transform:uppercase;letter-spacing:.04em;margin-top:2px;color:var(--txt3)}
+.cal-day.holiday{background:#201608;border-color:#4a3010}.cal-day.holiday .day-p{color:var(--amb)}
+.cal-day.high{background:#0d1a20;border-color:#1d3a50}.cal-day.high .day-p{color:var(--blu2)}
+.cal-day.peak{background:#0d1a0c;border-color:#1d4a1c}.cal-day.peak .day-p{color:var(--grn)}
+.cal-day.medium{background:var(--bg2);border-color:var(--bdr)}.cal-day.medium .day-p{color:var(--txt)}
+.cal-day.low{background:var(--bg)}.cal-day.low .day-p{color:var(--txt3)}
+
+/* ── Report ── */
+.report-pre{background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:18px 22px;font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--txt2);white-space:pre-wrap;overflow:auto;max-height:calc(100vh - 160px)}
+
+/* ── Prompt ── */
+.prompt-pre{background:var(--bg);border:1px solid var(--bdr);border-radius:var(--r2);padding:18px 22px;font-family:var(--mono);font-size:12px;line-height:1.75;color:var(--txt2);white-space:pre-wrap;overflow-y:auto;max-height:calc(100vh - 180px)}
+
+/* ── Animations ── */
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.anim{animation:slideUp .25s ease both}
+
+/* ── Section label ── */
+.sec-lbl{font-size:10px;font-weight:500;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-lbl::after{content:'';flex:1;height:1px;background:var(--bdr)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- TOP BAR -->
+<header>
+  <span class="logo">Revenue Engine <em>/ Airbnb</em></span>
+  <div class="hr-sep"></div>
+  <span class="key-pill key-default" id="keyPill">⬡ default keys</span>
+  <div class="hdr-right">
+    <button class="btn btn-ghost btn-sm" id="reloadKeyBtn" onclick="reloadKeys()">
+      <span id="reloadKeyIco">⟳</span> Reload Keys
+    </button>
+  </div>
+</header>
+
+<div class="body">
+
+<!-- ═══ LEFT PANEL ═══ -->
+<aside class="panel-left">
+<div class="left-scroll">
+
+  <!-- URL input -->
+  <div class="card">
+    <div class="card-hd">Airbnb Listing URL</div>
+    <div class="field" style="margin-bottom:10px">
+      <div class="url-row">
+        <input id="urlIn" type="text" placeholder="https://www.airbnb.com/rooms/…"
+               onkeydown="if(event.key==='Enter')getInfo()">
+        <button class="url-x" onclick="clearAll()">×</button>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="infoBtn" onclick="getInfo()" style="flex:1">
+        <span id="infoIco">⬡</span> Get Info
+      </button>
+      <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()" style="flex:1" disabled>
+        <span id="runIco">▶</span> Analyze
+      </button>
+    </div>
+  </div>
+
+  <!-- Listing card (hidden until Get Info) -->
+  <div id="listingCard" class="card listing-card" style="display:none">
+    <div class="card-hd">Listing Profile</div>
+    <div class="l-name" id="lName">—</div>
+    <div class="tag-row" id="lTags"></div>
+    <div class="rating-row">
+      <div class="r-big" id="lRating">—</div>
+      <div class="r-sub" id="lRevs"></div>
+    </div>
+    <div class="coords" id="lCoords"></div>
+    <div id="lWarn"></div>
+  </div>
+
+  <!-- Params (hidden until Get Info) -->
+  <div id="paramsCard" class="card" style="display:none">
+    <div class="card-hd">Analysis Parameters</div>
+    <div class="params-grid">
+      <div class="field"><label>Radius km</label><input id="pRadius" type="number" value="3" min="1" max="10" step=".5"></div>
+      <div class="field"><label>Your Rate ($)</label><input id="pRate" type="number" placeholder="auto"></div>
+      <div class="field"><label>Months e.g. 4,5,6</label><input id="pMonths" placeholder="auto (next 3)"></div>
+      <div class="field"><label>Year</label><input id="pYear" type="number" value="2026"></div>
+      <div class="field"><label>Similarity</label>
+        <select id="pSim"><option value="strict">Strict (1–2km)</option><option value="medium" selected>Medium (3km)</option><option value="broad">Broad (5km)</option></select>
+      </div>
+      <div class="field"><label>Goal</label>
+        <select id="pGoal"><option value="balanced" selected>Balanced</option><option value="revenue">Max Revenue</option><option value="occupancy">Max Occupancy</option></select>
+      </div>
+      <div class="field"><label>Currency</label>
+        <select id="pCur"><option value="USD" selected>USD $</option><option value="VND">VND ₫</option></select>
+      </div>
+      <div class="field"><label>Max Pages</label><input id="pPages" type="number" value="5" min="2" max="10"></div>
+    </div>
+  </div>
+
+  <!-- Progress (hidden until Run) -->
+  <div id="progCard" class="card" style="display:none">
+    <div class="card-hd" style="display:flex;align-items:center;gap:7px">
+      <span id="progSpinner" class="spin"></span>
+      <span id="progLabel">Running analysis…</span>
+      <span id="progPct" style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--txt3)"></span>
+    </div>
+    <div class="stage-track" id="stageTrack"></div>
+    <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:4%"></div></div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+</div><!-- .left-scroll -->
+</aside>
+
+<!-- ═══ RIGHT PANEL ═══ -->
+<main class="panel-right">
+  <div class="tab-bar">
+    <button class="tab on"  onclick="goTab('overview',this)">Overview</button>
+    <button class="tab"     onclick="goTab('calendar',this)">📅 Calendar</button>
+    <button class="tab"     onclick="goTab('comps',this)">Competitors <span class="badge" id="compBadge">0</span></button>
+    <button class="tab"     onclick="goTab('report',this)">Report</button>
+    <button class="tab"     onclick="goTab('prompt',this)">Claude Prompt</button>
+  </div>
+
+  <div class="tab-body">
+
+    <!-- OVERVIEW -->
+    <div id="pane-overview" class="pane on">
+      <div class="empty-state" id="ovEmpty">
+        <div class="empty-icon">⬡</div>
+        <div class="empty-label">Enter a listing URL and click Analyze</div>
+        <div class="empty-sub">Results will appear here automatically</div>
+      </div>
+      <div id="ovContent" style="display:none">
+        <div class="stat-row" id="statRow"></div>
+        <div class="sec-lbl">Position</div>
+        <div id="posBanner" style="margin-bottom:18px"></div>
+        <div class="sec-lbl">Recommended Rates</div>
+        <div class="price-rec-grid" id="recGrid"></div>
+        <div class="sec-lbl">Monthly Strategy</div>
+        <div class="month-row" id="monthRow"></div>
+        <div class="sec-lbl">Opportunities</div>
+        <div class="opp-list" id="oppList"></div>
+        <div class="sec-lbl">Downloads</div>
+        <div class="dl-row" id="dlRow"></div>
+      </div>
+    </div>
+
+    <!-- CALENDAR -->
+    <div id="pane-calendar" class="pane">
+      <div class="empty-state" id="calEmpty">
+        <div class="empty-icon">📅</div>
+        <div class="empty-label">Price calendar will appear here</div>
+      </div>
+      <div id="calContent" style="display:none">
+        <div class="cal-legend">
+          <div class="leg"><div class="leg-dot" style="background:#2a4018;border:1px solid #4a6830"></div>Peak/Holiday</div>
+          <div class="leg"><div class="leg-dot" style="background:#1a2838;border:1px solid #2a4860"></div>High (Fri/Sat)</div>
+          <div class="leg"><div class="leg-dot" style="background:var(--bg2);border:1px solid var(--bdr)"></div>Medium</div>
+          <div class="leg"><div class="leg-dot" style="background:var(--bg);border:1px solid var(--bdr)"></div>Low</div>
+        </div>
+        <div id="calGrid"></div>
+        <div style="margin-top:12px"><button class="btn btn-ghost btn-sm" onclick="dl('price_calendar.csv')">⬇ price_calendar.csv</button></div>
+      </div>
+    </div>
+
+    <!-- COMPS -->
+    <div id="pane-comps" class="pane">
+      <div class="empty-state" id="compsEmpty">
+        <div class="empty-icon">🏠</div>
+        <div class="empty-label">Competitor listings will appear here</div>
+      </div>
+      <div id="compsContent" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;gap:5px" id="compFilters">
+            <button class="btn btn-ghost btn-sm" onclick="fComps('all',this)" style="color:var(--gold2)">All</button>
+            <button class="btn btn-ghost btn-sm" onclick="fComps('direct',this)">Direct</button>
+            <button class="btn btn-ghost btn-sm" onclick="fComps('secondary',this)">Secondary</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="dl('comps.csv')">⬇ comps.csv</button>
+        </div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>#</th><th>Name</th><th>$/n</th><th>⭐</th><th>Rev</th><th>km</th><th>BR</th><th>Sim</th><th>Tier</th></tr></thead>
+            <tbody id="compTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- REPORT -->
+    <div id="pane-report" class="pane">
+      <div class="empty-state" id="repEmpty">
+        <div class="empty-icon">📄</div>
+        <div class="empty-label">Strategy report will appear here</div>
+      </div>
+      <div id="repContent" style="display:none">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" onclick="dl('strategy_report.txt')">⬇ strategy_report.txt</button>
+        </div>
+        <pre class="report-pre" id="repText"></pre>
+      </div>
+    </div>
+
+    <!-- CLAUDE PROMPT -->
+    <div id="pane-prompt" class="pane">
+      <div class="empty-state" id="promEmpty">
+        <div class="empty-icon">🤖</div>
+        <div class="empty-label">Claude prompt will appear here</div>
+        <div class="empty-sub">Ready to paste into claude.ai</div>
+      </div>
+      <div id="promContent" style="display:none">
+        <div style="display:flex;gap:8px;margin-bottom:10px;justify-content:flex-end">
+          <button class="btn btn-green btn-sm" id="copyBtn" onclick="copyPrompt()">📋 Copy all</button>
+          <button class="btn btn-ghost btn-sm" onclick="dl('claude_prompt.txt')">⬇ claude_prompt.txt</button>
+        </div>
+        <pre class="prompt-pre" id="promText"></pre>
+      </div>
+    </div>
+
+  </div><!-- .tab-body -->
+</main>
+
+</div><!-- .body -->
+</div><!-- .shell -->
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// SESSION  — persisted in localStorage, sent on every request
+// ═══════════════════════════════════════════════════════════════
+const SESSION_KEY = 'airbnb_engine_session';
+
+function getSessionId() {
+  return localStorage.getItem(SESSION_KEY) || '';
+}
+
+function saveSessionId(sid) {
+  if (sid && /^[0-9a-f]{16}$/.test(sid)) {
+    localStorage.setItem(SESSION_KEY, sid);
+    return sid;
+  }
+  return getSessionId();
+}
+
+// Wrapper: always attach X-Session-Id, always save returned session id
+async function api(url, opts = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Session-Id': getSessionId(),
+    ...(opts.headers || {}),
+  };
+  const res = await fetch(url, { ...opts, headers });
+  // Server may send back a (new) session id — always persist it
+  const sid = res.headers.get('X-Session-Id');
+  if (sid) saveSessionId(sid);
+  return res;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  state:     'idle',   // idle | info | ready | running | done | error
+  listing:   null,
+  summary:   null,
+  compsAll:  [],
+  calRows:   [],
+  jobId:     null,
+  cur:       'USD',
+};
+
+// ═══════════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════════
+const $  = id => document.getElementById(id);
+const qs = sel => document.querySelector(sel);
+const fmt = (n,c) => c==='VND'
+  ? new Intl.NumberFormat('vi-VN').format(Math.round(n))+'₫'
+  : '$'+new Intl.NumberFormat('en-US',{maximumFractionDigits:0}).format(n);
+
+function setState(next){ S.state = next; syncUI(); }
+
+function syncUI(){
+  const {state} = S;
+  const running = state === 'running';
+  $('runBtn').disabled = !['ready','done','error'].includes(state);
+  $('infoBtn').disabled = running;
+  $('urlIn').disabled   = running;
+  if(running){ $('runIco').innerHTML='<span class="spin"></span>'; }
+  else       { $('runIco').textContent='▶'; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TABS — work with or without event object
+// ═══════════════════════════════════════════════════════════════
+function goTab(name, btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('on'));
+  $('pane-'+name).classList.add('on');
+  if(btn) btn.classList.add('on');
+  else {
+    // find the tab button by index
+    const idx={overview:0,calendar:1,comps:2,report:3,prompt:4}[name]??0;
+    document.querySelectorAll('.tab')[idx]?.classList.add('on');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLEAR STATE
+// ═══════════════════════════════════════════════════════════════
+function clearAll(){
+  $('urlIn').value='';
+  $('listingCard').style.display='none';
+  $('paramsCard').style.display='none';
+  $('progCard').style.display='none';
+  $('ovEmpty').style.display='flex'; $('ovContent').style.display='none';
+  $('calEmpty').style.display='flex'; $('calContent').style.display='none';
+  $('compsEmpty').style.display='flex'; $('compsContent').style.display='none';
+  $('repEmpty').style.display='flex'; $('repContent').style.display='none';
+  $('promEmpty').style.display='flex'; $('promContent').style.display='none';
+  $('compBadge').textContent='0';
+  S.state='idle'; S.listing=null; S.summary=null; S.compsAll=[];
+  goTab('overview');
+  syncUI();
+  api('/api/cleanup',{method:'POST'}).catch(()=>{});
+}
+
+// ═══════════════════════════════════════════════════════════════
+// KEY STATUS
+// ═══════════════════════════════════════════════════════════════
+async function loadKeyStatus(){
+  try{
+    const d=await(await api('/api/keys')).json();
+    const pill=$('keyPill');
+    if(d.source==='live'){
+      pill.className='key-pill key-live';
+      pill.textContent=`✓ live: ${d.api_key_preview} · ${d.last_updated?.slice(11,19)||''}`;
+    } else {
+      pill.className='key-pill key-default';
+      pill.textContent=`⬡ default: ${d.api_key_preview}`;
+    }
+  }catch(e){}
+}
+
+async function reloadKeys(){
+  const btn=$('reloadKeyBtn'),ico=$('reloadKeyIco');
+  btn.disabled=true; ico.innerHTML='<span class="spin"></span>';
+  addLog('Intercepting Airbnb API keys via browser…','info');
+  try{
+    const d=await(await api('/api/reload-keys',{method:'POST'})).json();
+    if(d.success){
+      addLog(`Keys refreshed ✓ — ${d.api_key.slice(0,12)}…`,'done');
+      $('keyPill').className='key-pill key-live';
+      $('keyPill').textContent=`✓ live: ${d.api_key.slice(0,12)}… · ${d.updated_at?.slice(11,19)||''}`;
+    } else {
+      addLog('Key reload failed: '+d.error,'err');
+    }
+  }catch(e){ addLog('Key reload error: '+e,'err'); }
+  btn.disabled=false; ico.textContent='⟳';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GET INFO
+// ═══════════════════════════════════════════════════════════════
+async function getInfo(){
+  const url=$('urlIn').value.trim();
+  if(!url){ flash('urlIn'); return; }
+  const btn=$('infoBtn'),ico=$('infoIco');
+  btn.disabled=true; ico.innerHTML='<span class="spin"></span>';
+  setState('info');
+  $('progCard').style.display='block';
+  addLog('Fetching listing info…','info');
+  try{
+    const d=await(await api('/api/get-info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})})).json();
+    if(d.error){ addLog('Error: '+d.error,'err'); setState('idle'); return; }
+    S.listing=d.listing;
+    renderListingCard(d.listing);
+    $('paramsCard').style.display='block';
+    $('pRate').value=d.listing.nightly_rate||'';
+    setState('ready');
+    addLog(`Got info ✓ — ${d.listing.name||d.listing.listing_id}`,'done');
+  }catch(e){ addLog('Network error: '+e,'err'); setState('idle'); }
+  btn.disabled=false; ico.textContent='⬡';
+}
+
+function renderListingCard(l){
+  $('lName').textContent = l.name || '(name not extracted)';
+  const tags=[
+    l.room_type&&`<span class="tag tag-type">${l.room_type}</span>`,
+    l.bedrooms&&`<span class="tag tag-spec">${l.bedrooms}BR</span>`,
+    l.beds&&`<span class="tag tag-spec">${l.beds} beds</span>`,
+    l.bathrooms&&`<span class="tag tag-spec">${l.bathrooms} baths</span>`,
+    l.max_guests&&`<span class="tag tag-spec">${l.max_guests} guests</span>`,
+    l.is_superhost&&`<span class="tag tag-sh">★ Superhost</span>`,
+    l.badge&&`<span class="tag tag-badge">${l.badge}</span>`,
+  ].filter(Boolean).join('');
+  $('lTags').innerHTML=tags;
+  $('lRating').textContent=l.rating?`${l.rating}★`:'—★';
+  $('lRevs').textContent=l.review_count?`${l.review_count} reviews`:'No reviews yet';
+  $('lCoords').textContent=l.latitude
+    ?`${l.latitude.toFixed(4)}, ${l.longitude.toFixed(4)} · ${[l.city,l.state].filter(Boolean).join(', ')}`
+    :'Coordinates not extracted';
+  $('lWarn').innerHTML=!l.rating?'<div class="warn-note">⚠ Rating=0 — pipeline will fetch from /reviews page</div>':'';
+  $('listingCard').style.display='block';
+}
+
+function flash(id){
+  const el=$(id); el.style.borderColor='var(--red)';
+  setTimeout(()=>el.style.borderColor='',1400);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RUN ANALYSIS
+// ═══════════════════════════════════════════════════════════════
+
+// Stage labels for progress tracking
+const STAGES=['A:Input','B:Listing','C:Geo','D:Retrieve','D+:Prices','E:Similarity','F:Pricing','G:Monthly','H:Days','I:Strategy'];
+
+function initStageTrack(){
+  $('stageTrack').innerHTML=STAGES.map((s,i)=>
+    `<div class="stage-dot" id="st${i}" title="${s}"></div>`).join('');
+}
+
+function setStage(label){
+  STAGES.forEach((s,i)=>{
+    const dot=$(`st${i}`);
+    if(!dot) return;
+    const done=i<STAGES.findIndex(s2=>label.includes(s2.split(':')[0]));
+    const active=label.includes(s.split(':')[0]);
+    dot.className='stage-dot'+(done?' done':active?' active':'');
+  });
+}
+
+let _pct=4;
+function setPct(p){ _pct=Math.max(_pct,Math.min(p,98)); $('progFill').style.width=_pct+'%'; $('progPct').textContent=Math.round(_pct)+'%'; }
+
+async function runAnalysis(){
+  const url=$('urlIn').value.trim();
+  if(!url){ flash('urlIn'); return; }
+  setState('running');
+
+  // Reset ALL tab content to empty
+  resetAllTabs();
+
+  $('progCard').style.display='block';
+  $('logBox').innerHTML=''; _pct=4; setPct(4);
+  initStageTrack();
+  $('progLabel').textContent='Running analysis…';
+  $('progSpinner').style.display='inline-block';
+  addLog('Starting full pipeline…','info');
+
+  const params={
+    url,
+    radius_km: +$('pRadius').value||3,
+    target_months: $('pMonths').value,
+    target_year: +$('pYear').value||2026,
+    similarity: $('pSim').value,
+    goal: $('pGoal').value,
+    currency: $('pCur').value,
+    your_rate: +$('pRate').value||0,
+    max_pages: +$('pPages').value||5,
+    target_comps: 60,
+  };
+  S.cur = params.currency;
+
+  try{
+    const d=await(await api('/api/run-analysis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)})).json();
+    if(d.error){ addLog('Error: '+d.error,'err'); setState('error'); return; }
+    S.jobId=d.job_id;
+    streamLogs(d.job_id);
+  }catch(e){ addLog('Network error: '+e,'err'); setState('error'); }
+}
+
+function resetAllTabs(){
+  $('ovEmpty').style.display='flex';     $('ovContent').style.display='none';
+  $('calEmpty').style.display='flex';    $('calContent').style.display='none';
+  $('compsEmpty').style.display='flex';  $('compsContent').style.display='none';
+  $('repEmpty').style.display='flex';    $('repContent').style.display='none';
+  $('promEmpty').style.display='flex';   $('promContent').style.display='none';
+  $('compBadge').textContent='0';
+  S.compsAll=[]; S.calRows=[];
+}
+
+function streamLogs(jobId){
+  const es=new EventSource('/api/stream/'+jobId);
+  es.onmessage=e=>{
+    const msg=JSON.parse(e.data);
+    if(msg.type==='end'||msg.type==='done'){ es.close(); onDone(jobId); return; }
+    if(msg.type==='error'){ es.close(); onError(msg.data); return; }
+    if(msg.type==='ping') return;
+    if(msg.type==='log'){
+      addLog(msg.data);
+      // Stage progress
+      const s=STAGES.findIndex(st=>msg.data.includes('Stage '+st.split(':')[0]));
+      if(s>=0){ setStage(STAGES[s]); setPct(8+(s+1)/STAGES.length*86); }
+    }
+  };
+  es.onerror=()=>{ es.close(); pollJob(jobId); };
+}
+
+async function pollJob(jobId){
+  while(true){
+    await new Promise(r=>setTimeout(r,2500));
+    const d=await(await api('/api/job/'+jobId)).json();
+    (d.logs||[]).forEach(l=>addLog(l));
+    if(d.status==='done'){ await onDone(jobId); break; }
+    if(d.status==='error'){ onError(d.error); break; }
+  }
+}
+
+async function onDone(jobId){
+  setPct(100);
+  $('progLabel').textContent='Analysis complete ✓';
+  $('progSpinner').style.display='none';
+  $('stageTrack').querySelectorAll('.stage-dot').forEach(d=>d.className='stage-dot done');
+  addLog('All stages complete — loading results…','done');
+
+  const d=await(await api('/api/job/'+jobId)).json();
+  const sum=d.summary;
+  if(!sum){ onError('No summary returned'); return; }
+  S.summary=sum; S.cur=sum.currency||'USD'; S.compsAll=sum.comps||[];
+
+  // Render all tabs in parallel
+  await Promise.all([
+    renderOverview(sum),
+    loadAndRenderCalendar(),
+    renderCompsTab(sum.comps||[]),
+    loadAndRenderReport(),
+    loadAndRenderPrompt(),
+  ]);
+
+  setState('done');
+  // Auto-switch to overview
+  goTab('overview');
+  addLog('Results loaded into all tabs ✓','done');
+}
+
+function onError(msg){
+  $('progLabel').textContent='Error ✗';
+  $('progSpinner').style.display='none';
+  addLog('Error: '+msg,'err');
+  setState('error');
+}
+
+function addLog(msg,cls){
+  const b=$('logBox');
+  const sp=document.createElement('span');
+  sp.className='ll '+(cls||detectCls(msg));
+  sp.textContent=msg;
+  b.appendChild(sp);
+  b.appendChild(document.createElement('br'));
+  b.scrollTop=b.scrollHeight;
+}
+function detectCls(m){
+  if(/✓|complete|done|saved/i.test(m)) return 'done';
+  if(/error|fail|exception/i.test(m)) return 'err';
+  if(/warn|anomaly|missing/i.test(m)) return 'warn';
+  return 'info';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// OVERVIEW TAB
+// ═══════════════════════════════════════════════════════════════
+async function renderOverview(s){
+  $('ovEmpty').style.display='none'; $('ovContent').style.display='block';
+  const cur=s.currency||'USD';
+
+  // Stats
+  const your=s.your_rate||0;
+  const vs=s.median?(your-s.median)/s.median*100:0;
+  const vsCol=vs<-10?'a':vs>15?'r':'g';
+  $('statRow').innerHTML=[
+    {l:'Market P50',v:fmt(s.median,cur),s:`P25 ${fmt(s.p25,cur)} – P75 ${fmt(s.p75,cur)}`},
+    {l:'Suggested',v:fmt(s.suggested_base,cur),s:'Weighted comp median',c:'b'},
+    {l:'Direct Comps',v:s.direct_count,s:`of ${s.comp_count} total`,c:s.direct_count>=5?'g':'a'},
+    {l:'Confidence',v:(s.confidence||'?').toUpperCase(),s:'',c:s.confidence==='high'?'g':s.confidence==='low'?'r':''},
+    ...(your?[{l:'Your Rate',v:fmt(your,cur),s:`${vs>=0?'+':''}${vs.toFixed(1)}% vs market`,c:vsCol}]:[]),
+  ].map(x=>`<div class="stat"><div class="stat-lbl">${x.l}</div><div class="stat-val ${x.c||''}">${x.v}</div><div class="stat-sub">${x.s||''}</div></div>`).join('');
+
+  // Position banner
+  const ai=s.ai_strategy||{}; const pos=ai.positioning||{};
+  const dir=pos.gap_direction||'';
+  if(dir){
+    const [cls,icon,col]= dir==='underpriced'?['pos-under','↑ Underpriced','var(--amb)']
+                           :dir==='overpriced'?['pos-over','↓ Overpriced','var(--red)']
+                           :['pos-ok','✓ On Target','var(--grn)'];
+    $('posBanner').innerHTML=`<div class="pos-banner ${cls}">
+      <div class="pos-label" style="color:${col}">${icon}</div>
+      <div class="pos-pct" style="color:${col}">${Math.abs(pos.gap_pct||0).toFixed(0)}%</div>
+      <div class="pos-reason">${pos.reasoning||''}</div>
+    </div>`;
+  } else { $('posBanner').innerHTML=''; }
+
+  // Price recommendations
+  const pr=ai.price_recommendations||{};
+  const recFields=[['Weekday','weekday_base'],['Thu','thursday'],['Friday','friday'],['Sat','saturday'],['Sun','sunday'],['Holiday','holiday'],['Floor','floor']];
+  $('recGrid').innerHTML=recFields.filter(([,k])=>pr[k]).map(([l,k])=>`
+    <div class="pr-card"><div class="pr-lbl">${l}</div><div class="pr-val">${fmt(pr[k],cur)}</div></div>`).join('');
+
+  // Month cards
+  const plans=s.monthly_plans||[];
+  $('monthRow').innerHTML=plans.map(m=>{
+    const r=m.rates||{}; const sc=`season-${m.season}`;
+    const rows=[['Mon–Wed',r.weekday],['Thursday',r.thursday],['Friday',r.friday],['Saturday',r.saturday],['Holiday',r.holiday],['Floor',r.floor]]
+      .filter(([,v])=>v).map(([l,v],i)=>`<tr><td class="lbl">${l}</td><td class="val ${i>=4?'hi':''}">${fmt(v,cur)}</td></tr>`).join('');
+    return `<div class="month-card">
+      <div class="mc-head"><div class="mc-name">${m.month_name} ${m.year}</div><span class="${sc}">${(m.season||'').toUpperCase()}</span></div>
+      <table class="rate-tbl"><tbody>${rows}</tbody></table>
+      <div class="mc-footer">
+        <span>Occ ${((m.occupancy_target||0)*100).toFixed(0)}%</span>
+        <span>Rev ${fmt(m.revenue_target||0,cur)}</span>
+        <span>Min ${m.min_stay_weekday||1}n wd / ${m.min_stay_weekend||2}n we</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Opportunities
+  const opps=ai.opportunities||[];
+  $('oppList').innerHTML=opps.length
+    ?opps.map(o=>`<div class="opp"><span class="opp-p p-${o.priority||'low'}">${(o.priority||'?').toUpperCase()}</span><div class="opp-txt">${o.action||o.type||''}</div></div>`).join('')
+    :'<div style="color:var(--txt3);font-size:13px;padding:8px 0">No AI strategy — set ANTHROPIC_API_KEY for full analysis</div>';
+
+  // Downloads
+  const FILES={'strategy_full.json':'⬡','comps.csv':'📊','price_calendar.csv':'📅','strategy_report.txt':'📄','claude_prompt.txt':'🤖'};
+  const files=s.files||{};
+  $('dlRow').innerHTML=Object.keys(FILES).filter(f=>files[f]).map(f=>`
+    <button class="btn btn-ghost btn-sm" onclick="dl('${f}')" title="${files[f].size.toLocaleString()} bytes">
+      ${FILES[f]} ${f} <span style="color:var(--txt3);font-size:10px">${(files[f].size/1024).toFixed(1)}K</span>
+    </button>`).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CALENDAR TAB
+// ═══════════════════════════════════════════════════════════════
+async function loadAndRenderCalendar(){
+  try{
+    const d=await(await api('/api/file-content/price_calendar.csv')).json();
+    if(!d.content) return;
+    const rows=d.content.trim().split('\n').slice(1).map(line=>{
+      const c=line.split(',');
+      return {date:c[0],day_name:c[1],day_type:c[2],month:c[3],
+              season:c[4],demand:c[5],price:+c[6],floor:+c[7],
+              currency:c[8],min_stay:+c[9],is_holiday:c[10]==='True'};
+    });
+    S.calRows=rows; renderCalendar(rows);
+    $('calEmpty').style.display='none'; $('calContent').style.display='block';
+  }catch(e){ console.warn('Calendar load:',e); }
+}
+
+function renderCalendar(rows){
+  const byM={};
+  rows.forEach(r=>{ (byM[r.month]=byM[r.month]||[]).push(r); });
+  const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const cur=rows[0]?.currency||S.cur;
+
+  $('calGrid').innerHTML=Object.entries(byM).map(([month,days])=>{
+    const fd=new Date(days[0].date);
+    const startWd=(fd.getDay()+6)%7; // Mon=0
+    const hdrs=DAYS.map(d=>`<div class="cal-hd">${d}</div>`).join('');
+    const blanks=Array(startWd).fill('<div class="cal-day empty"></div>').join('');
+    const cells=days.map(r=>{
+      const d=new Date(r.date).getDate();
+      const cls=r.is_holiday?'holiday':r.demand==='high'||r.demand==='peak'?'high':r.demand==='low'?'low':'medium';
+      const pStr=cur==='VND'?Math.round(r.price/1000)+'K':'$'+Math.round(r.price);
+      return `<div class="cal-day ${cls}" title="${r.date} · ${r.day_name}\n${r.day_type} · ${r.demand}\nPrice: ${pStr}\nMin stay: ${r.min_stay}n">
+        <div class="day-n">${d}</div>
+        <div class="day-p">${pStr}</div>
+        <div class="day-t">${r.is_holiday?'HOL':r.day_type.slice(0,3).toUpperCase()}</div>
+      </div>`;
+    }).join('');
+    return `<div class="cal-month"><div class="cal-month-name">${month} ${fd.getFullYear()}</div>
+      <div style="overflow-x:auto"><div class="cal-grid">${hdrs}${blanks}${cells}</div></div></div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COMPS TAB
+// ═══════════════════════════════════════════════════════════════
+async function renderCompsTab(comps){
+  S.compsAll=comps;
+  $('compBadge').textContent=comps.length;
+  renderCompTable(comps);
+  $('compsEmpty').style.display='none'; $('compsContent').style.display='block';
+}
+
+function fComps(tier,btn){
+  document.querySelectorAll('#compFilters button').forEach(b=>b.style.color='');
+  btn.style.color='var(--gold2)';
+  const data=tier==='all'?S.compsAll:S.compsAll.filter(c=>tierStr(c.tier)===tier);
+  renderCompTable(data);
+}
+
+function tierStr(t){ return typeof t==='object'?t?.value||'?':String(t).split('.').pop().toLowerCase(); }
+
+function renderCompTable(data){
+  $('compTbody').innerHTML=data.map((c,i)=>{
+    const t=tierStr(c.tier);
+    const dist=c.distance_km>=0?c.distance_km.toFixed(1)+'km':'n/a';
+    return `<tr>
+      <td class="nm" style="color:var(--txt3)">${i+1}</td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+        <a href="${c.url||'#'}" target="_blank" title="${c.name}">${c.name}</a>
+      </td>
+      <td class="nm" style="color:var(--gold2)">$${c.price_per_night?.toFixed(0)||0}</td>
+      <td class="nm">${c.rating?.toFixed(2)||'—'}</td>
+      <td class="nm">${c.review_count||0}</td>
+      <td class="nm">${dist}</td>
+      <td class="nm">${c.bedrooms||0}</td>
+      <td class="nm" style="color:var(--txt3)">${((c.similarity_score||0)*100).toFixed(0)}%</td>
+      <td class="td-${t}">${t}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// REPORT TAB
+// ═══════════════════════════════════════════════════════════════
+async function loadAndRenderReport(){
+  try{
+    const d=await(await api('/api/file-content/strategy_report.txt')).json();
+    if(!d.content) return;
+    $('repText').textContent=d.content;
+    $('repEmpty').style.display='none'; $('repContent').style.display='block';
+  }catch(e){ console.warn('Report:',e); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// CLAUDE PROMPT TAB
+// ═══════════════════════════════════════════════════════════════
+async function loadAndRenderPrompt(){
+  try{
+    const d=await(await api('/api/file-content/claude_prompt.txt')).json();
+    if(!d.content) return;
+    $('promText').textContent=d.content;
+    $('promEmpty').style.display='none'; $('promContent').style.display='block';
+  }catch(e){ console.warn('Prompt:',e); }
+}
+
+async function copyPrompt(){
+  const text=$('promText').textContent;
+  try{
+    await navigator.clipboard.writeText(text);
+    const b=$('copyBtn'); b.textContent='✓ Copied!';
+    setTimeout(()=>b.textContent='📋 Copy all',2200);
+  }catch(e){ alert('Copy failed — please select all text manually (Ctrl+A)'); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DOWNLOAD
+// ═══════════════════════════════════════════════════════════════
+function dl(filename){ window.open('/api/download/'+encodeURIComponent(filename),'_blank'); }
+
+// ═══════════════════════════════════════════════════════════════
+// INIT — clean startup, no old files
+// ═══════════════════════════════════════════════════════════════
+loadKeyStatus();
+setInterval(loadKeyStatus, 30000);
+// ── Init: register session with server ──────────────────────────
+(async () => {
+  try {
+    // GET /api/session returns our session_id and any existing files
+    const r = await api('/api/session');
+    const d = await r.json();
+    saveSessionId(d.session_id);
+    // If this session already has files (e.g. page refresh), show download buttons
+    const files = d.files || {};
+    if (Object.keys(files).length > 0) {
+      const FILES = {'strategy_full.json':'⬡','comps.csv':'📊',
+                     'price_calendar.csv':'📅','strategy_report.txt':'📄',
+                     'claude_prompt.txt':'🤖'};
+      $('dlRow').innerHTML = Object.keys(FILES).filter(f => files[f]).map(f =>
+        `<button class="btn btn-ghost btn-sm" onclick="dl('${f}')">${FILES[f]} ${f}
+         <span style="color:var(--txt3);font-size:10px">${(files[f].size/1024).toFixed(1)}K</span></button>`
+      ).join('');
+      if (Object.keys(files).length > 0) {
+        $('ovEmpty').innerHTML =
+          '<div class="empty-icon" style="font-size:32px">📂</div>' +
+          '<div class="empty-label">Previous results available</div>' +
+          '<div class="empty-sub">Run a new analysis or click Reload</div>';
+        $('ovContent').style.display = 'block';
+      }
+    }
+  } catch(e) { console.warn('Session init:', e); }
+})();
+</script>
+</body>
+</html>
