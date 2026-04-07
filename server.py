@@ -66,11 +66,13 @@ def _session_dir(session_id: str) -> Path:
 
 def _get_session_id() -> str:
     """
-    Read X-Session-Id from request header.
-    If missing or invalid, generate a new one.
-    The caller must return it back to the client in the response header.
+    Read session id from:
+      1. X-Session-Id request header   (fetch calls)
+      2. ?sid= query parameter         (window.open / direct URL navigation)
+    Generates a new id if neither is valid.
     """
-    sid = request.headers.get("X-Session-Id", "")
+    sid = (request.headers.get("X-Session-Id", "")
+           or request.args.get("sid", ""))
     if not re.fullmatch(r"[0-9a-f]{16}", sid):
         sid = _new_session_id()
     return sid
@@ -177,45 +179,95 @@ def _build_summary(result: dict, session_id: str) -> dict:
     p   = result.get("pricing", {})
     l   = result.get("listing", {})
     ai  = result.get("ai_strategy", {})
-    return {
-        "comp_count":    p.get("comp_count", 0),
-        "direct_count":  p.get("direct_count", 0),
-        "median":        p.get("median", 0),
-        "p25":           p.get("p25", 0),
-        "p75":           p.get("p75", 0),
-        "p10":           p.get("p10", 0),
-        "p90":           p.get("p90", 0),
-        "suggested_base": p.get("suggested_base", 0),
-        "currency":      p.get("currency", "USD"),
-        "tier_position": p.get("tier_position", ""),
-        "confidence":    result.get("confidence", "?"),
-        "listing_name":  l.get("name", ""),
-        "listing_url":   l.get("url", ""),
-        "listing_rating":   l.get("rating", 0),
-        "listing_reviews":  l.get("review_count", 0),
-        "listing_bedrooms": l.get("bedrooms", 0),
-        "listing_beds":     l.get("beds", 0),
-        "listing_baths":    l.get("bathrooms", 0),
-        "listing_guests":   l.get("max_guests", 0),
-        "listing_city":     l.get("city", ""),
-        "listing_state":    l.get("state", ""),
-        "listing_lat":      l.get("latitude", 0),
-        "listing_lng":      l.get("longitude", 0),
-        "listing_type":     l.get("room_type", ""),
-        "listing_superhost":l.get("is_superhost", False),
-        "listing_badge":    l.get("badge", ""),
-        "your_rate":        l.get("nightly_rate", 0),
-        "monthly_plans":    result.get("monthly_plans", []),
-        "date_samples":     result.get("date_samples", []),
-        "date_summary":     result.get("date_summary", {}),
-        "comps":            result.get("comps", [])[:30],
-        "ai_strategy":      ai,
-        "sample_days":      result.get("sample_days", []),
-        "files":            _list_files(session_id),
-        "session_id":       session_id,
-    }
 
+    # Hàm hỗ trợ ép kiểu an toàn: 
+    # Nếu là object phức tạp (như CompTier), nó sẽ lấy giá trị chuỗi hoặc tên của object đó
+    def to_safe_val(val):
+        if val is None: return None
+        if isinstance(val, (int, float, bool, str)): return val
+        # Nếu là Enum hoặc Object có thuộc tính .value hoặc .name
+        if hasattr(val, "value"): return val.value
+        if hasattr(val, "name"): return val.name
+        return str(val)
 
+    return _make_json_safe({
+    "comp_count":    to_safe_val(p.get("comp_count", 0)),
+    "direct_count":  to_safe_val(p.get("direct_count", 0)),
+    "median":        to_safe_val(p.get("median", 0)),
+    "p25":           to_safe_val(p.get("p25", 0)),
+    "p75":           to_safe_val(p.get("p75", 0)),
+    "p10":           to_safe_val(p.get("p10", 0)),
+    "p90":           to_safe_val(p.get("p90", 0)),
+    "suggested_base": to_safe_val(p.get("suggested_base", 0)),
+    "currency":      str(p.get("currency", "USD")),
+    "tier_position": to_safe_val(p.get("tier_position", "")),
+    "confidence":    str(result.get("confidence", "?")),
+
+    "listing_name":  str(l.get("name", "")),
+    "listing_url":   str(l.get("url", "")),
+    "listing_rating":   to_safe_val(l.get("rating", 0)),
+    "listing_reviews":  to_safe_val(l.get("review_count", 0)),
+    "listing_bedrooms": to_safe_val(l.get("bedrooms", 0)),
+    "listing_beds":     to_safe_val(l.get("beds", 0)),
+    "listing_baths":    to_safe_val(l.get("bathrooms", 0)),
+    "listing_guests":   to_safe_val(l.get("max_guests", 0)),
+    "listing_city":     str(l.get("city", "")),
+    "listing_state":    str(l.get("state", "")),
+    "listing_lat":      to_safe_val(l.get("latitude", 0)),
+    "listing_lng":      to_safe_val(l.get("longitude", 0)),
+    "listing_type":     str(l.get("room_type", "")),
+    "listing_superhost": bool(l.get("is_superhost", False)),
+    "listing_badge":    str(l.get("badge", "")),
+
+    "your_rate":        to_safe_val(l.get("nightly_rate", 0)),
+
+    # 🔥 những chỗ dễ crash nhất
+    "monthly_plans":    result.get("monthly_plans", []),
+    "date_samples":     result.get("date_samples", []),
+    "date_summary":     result.get("date_summary", {}),
+    "comps":            result.get("comps", [])[:30],
+    "ai_strategy":      ai,
+    "sample_days":      result.get("sample_days", []),
+
+    "files":            _list_files(session_id),
+    "session_id":       str(session_id),
+})
+
+def _make_json_safe(obj):
+    """Recursively convert any object into JSON-serializable form."""
+    if obj is None:
+        return None
+
+    # Primitive types
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # List / tuple
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(x) for x in obj]
+
+    # Dict
+    if isinstance(obj, dict):
+        return {str(k): _make_json_safe(v) for k, v in obj.items()}
+
+    # Datetime
+    if isinstance(obj, (datetime,)):
+        return obj.isoformat()
+
+    # Has __dict__ (class instance như CompTier)
+    if hasattr(obj, "__dict__"):
+        return _make_json_safe(vars(obj))
+
+    # Has to_dict()
+    if hasattr(obj, "to_dict"):
+        return _make_json_safe(obj.to_dict())
+
+    # Enum
+    if hasattr(obj, "value"):
+        return obj.value
+
+    # Fallback
+    return str(obj)
 # ══════════════════════════════════════════════════════════════════
 # API: /api/session  — issue or validate a session
 # ══════════════════════════════════════════════════════════════════
@@ -427,13 +479,17 @@ def stream_job(job_id: str):
 def job_status(job_id: str):
     if job_id not in _jobs:
         return jsonify({"error": "Unknown job"}), 404
+    
     job = _jobs[job_id]
-    return jsonify({
-        "status":  job["status"],
-        "logs":    job["logs"][-100:],
-        "error":   job["error"],
+
+    safe_response = _make_json_safe({
+        "status":  job.get("status", "unknown"),
+        "logs":    job.get("logs", [])[-100:],
+        "error":   job.get("error"),
         "summary": job.get("summary"),
     })
+
+    return jsonify(safe_response)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -488,6 +544,28 @@ def cleanup():
 # ══════════════════════════════════════════════════════════════════
 # API: /api/keys  (global status)
 # ══════════════════════════════════════════════════════════════════
+
+@app.route("/api/update-keys", methods=["POST"])
+def update_keys_manual():
+    """Manual fallback: user pastes api_key and hash directly."""
+    sid  = _get_session_id()
+    body = request.get_json(force=True)
+    api_key = (body.get("api_key") or "").strip()
+    hash_   = (body.get("hash") or "").strip()
+    if not re.fullmatch(r"[a-z0-9]{20,}", api_key):
+        resp = jsonify({"error": "Invalid API key format"}); resp.status_code=400
+        return _add_session_header(resp, sid)
+    if not re.fullmatch(r"[a-f0-9]{40,}", hash_):
+        resp = jsonify({"error": "Invalid hash format (must be 40+ hex chars)"}); resp.status_code=400
+        return _add_session_header(resp, sid)
+    _KEY_STORE.update({"api_key": api_key, "hash": hash_,
+                       "last_updated": datetime.now().isoformat(), "source": "manual"})
+    _load_pipeline()  # reload with new keys
+    log.info(f"Keys updated manually by [{sid}]: {api_key[:12]}…")
+    resp = jsonify({"success": True, "api_key": api_key, "hash": hash_,
+                    "updated_at": _KEY_STORE["last_updated"]})
+    return _add_session_header(resp, sid)
+
 
 @app.route("/api/keys")
 def key_status():

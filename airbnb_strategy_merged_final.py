@@ -193,6 +193,8 @@ class Competitor:
     is_superhost:         bool
     badge:                str
     estimated_occupancy:  float = 0.0
+    room_type:            str   = ""    # "Entire home" / "Private room" / "Shared room"
+    max_guests:           int   = 0     # max occupancy
     # Stage E additions
     similarity_score:     float = 0.0
     tier:                 CompTier = CompTier.CONTEXT
@@ -386,23 +388,88 @@ def _dig(obj: Any, *keys, default=None) -> Any:
 
 
 def _extract_from_next_data(blob: dict) -> Optional[dict]:
-    for path in [
-        ("props", "pageProps", "bootstrapData", "reduxData", "homePDP", "listingInfo", "listing"),
-        ("props", "pageProps", "listing"),
-    ]:
+    """Try multiple known paths, then fall back to recursive key search."""
+    paths = [
+        ("props","pageProps","bootstrapData","reduxData","homePDP","listingInfo","listing"),
+        ("props","pageProps","listing"),
+        ("props","pageProps","prefetchedData","homePDP","listingInfo","listing"),
+        # 2024 structure: niobeMinimalClientData is a list of [key, value] pairs
+    ]
+    for path in paths:
         node = _dig(blob, *path)
-        if node:
+        if node and isinstance(node, dict):
             return node
-    return None
+
+    # Fallback: walk the entire blob looking for a dict with 'coordinate' key
+    def _find_coord_node(obj, depth=0):
+        if depth > 8 or not isinstance(obj, (dict, list)):
+            return None
+        if isinstance(obj, dict):
+            if "coordinate" in obj and isinstance(obj["coordinate"], dict):
+                lat = obj["coordinate"].get("latitude")
+                if lat and abs(float(lat)) <= 90:
+                    return obj
+            for v in obj.values():
+                result = _find_coord_node(v, depth+1)
+                if result:
+                    return result
+        elif isinstance(obj, list):
+            for item in obj[:10]:
+                result = _find_coord_node(item, depth+1)
+                if result:
+                    return result
+        return None
+
+    return _find_coord_node(blob)
 
 
 def _regex_extract_listing(html: str) -> dict:
     result = {}
-    patterns = {
-        "latitude":       r'"latitude"\s*:\s*([\d.\-]+)',
-        "longitude":      r'"longitude"\s*:\s*([\d.\-]+)',
-        "city":           r'"city"\s*:\s*"([^"]+)"',
-        "state":          r'"stateCode"\s*:\s*"([^"]+)"',
+
+    # ── Name: og:title is the most reliable ──
+    m = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', html)
+    if not m:
+        m = re.search(r'<meta[^>]+content=["\'](.*?)["\']\s[^>]+property=["\']og:title["\']>', html)
+    if m:
+        title = m.group(1).strip()
+        # og:title format: "Listing Name | Airbnb" — take part before |
+        title = title.split(" | ")[0].strip()
+        if len(title) > 3:
+            result["name"] = title
+
+    # ── Fallback name: h1 ──
+    if not result.get("name"):
+        m = re.search(r'<h1[^>]*>([^<]{5,120})</h1>', html)
+        if m:
+            result["name"] = m.group(1).strip()
+
+    # ── Coordinates: try multiple patterns ──
+    # Pattern 1: "coordinate":{"latitude":16.06,"longitude":108.24}
+    m = re.search(r'"coordinate"\s*:\s*\{"[^}]*"latitude"\s*:\s*([\d.\-]+)[^}]*"longitude"\s*:\s*([\d.\-]+)', html)
+    if m:
+        result["latitude"]  = float(m.group(1))
+        result["longitude"] = float(m.group(2))
+
+    # Pattern 2: "lat":16.06,"lng":108.24
+    if not result.get("latitude"):
+        m = re.search(r'"lat"\s*:\s*(1[0-9]\.\d+).*?"lng"\s*:\s*(1[01][0-9]\.\d+)', html, re.DOTALL)
+        if m:
+            result["latitude"]  = float(m.group(1))
+            result["longitude"] = float(m.group(2))
+
+    # Pattern 3: standalone "latitude":16.xxx (Vietnam range 8-24)
+    if not result.get("latitude"):
+        m = re.search(r'"latitude"\s*:\s*([89]|1[0-9]|2[0-4])\.\d+', html)
+        if m:
+            result["latitude"] = float(m.group(0).split(":")[-1].strip())
+        m2 = re.search(r'"longitude"\s*:\s*(10[0-9]|110|111)\.\d+', html)
+        if m2:
+            result["longitude"] = float(m2.group(0).split(":")[-1].strip())
+
+    # ── Other fields ──
+    simple = {
+        "city":           r'"city"\s*:\s*"([^"]{2,80})"',
+        "state":          r'"stateCode"\s*:\s*"([^"]{2,40})"',
         "room_type_raw":  r'"roomTypeCategory"\s*:\s*"([^"]+)"',
         "bedrooms":       r'"bedrooms"\s*:\s*(\d+)',
         "beds":           r'"beds"\s*:\s*(\d+)',
@@ -410,16 +477,17 @@ def _regex_extract_listing(html: str) -> dict:
         "personCapacity": r'"personCapacity"\s*:\s*(\d+)',
         "starRating":     r'"starRating"\s*:\s*([\d.]+)',
         "reviewsCount":   r'"reviewsCount"\s*:\s*(\d+)',
-        "name":           r'"name"\s*:\s*"([^"]{5,120})"',
     }
-    for field_name, pat in patterns.items():
-        m = re.search(pat, html)
-        if m:
-            val = m.group(1)
-            try:
-                result[field_name] = float(val) if "." in val else int(val) if val.isdigit() else val
-            except:
-                result[field_name] = val
+    for field_name, pat in simple.items():
+        if not result.get(field_name):
+            m = re.search(pat, html)
+            if m:
+                val = m.group(1)
+                try:
+                    result[field_name] = float(val) if "." in val else int(val) if val.isdigit() else val
+                except:
+                    result[field_name] = val
+
     return result
 
 
@@ -632,79 +700,125 @@ def _post_graphql(body: dict, retries: int = 3) -> Optional[dict]:
 
 
 def _parse_node(node: dict, origin_lat: float, origin_lon: float, currency: str) -> Optional[Competitor]:
-    dsl = node.get("demandStayListing") or {}
-    lid_b64 = dsl.get("id", "")
-    lid = ""
-    if lid_b64:
-        try:
-            m = re.search(r"(\d+)", base64.b64decode(lid_b64 + "==").decode())
-            lid = m.group(1) if m else ""
-        except:
-            pass
+    """Parse một node từ Airbnb GraphQL response → Competitor object (FIXED 2026)"""
+    try:
+        # Lấy demandStayListing (phần dữ liệu chính)
+        dsl = node.get("demandStayListing") or {}
+        listing_id_b64 = dsl.get("id", "")
 
-    name = ""
-    desc = (dsl.get("description") or {}).get("name") or {}
-    name = desc.get("localizedStringWithTranslationPreference", "")
-    if not name:
-        name = node.get("subtitle", "") or node.get("title", "")
-    if not name:
+        # Decode listing ID
+        listing_id = ""
+        if listing_id_b64:
+            try:
+                decoded = base64.b64decode(listing_id_b64 + "==").decode('utf-8')
+                m = re.search(r'(\d+)', decoded)
+                if m:
+                    listing_id = m.group(1)
+            except:
+                pass
+
+        # === NAME ===
+        name = ""
+        if dsl.get("description", {}).get("name", {}).get("localizedStringWithTranslationPreference"):
+            name = dsl["description"]["name"]["localizedStringWithTranslationPreference"]
+        elif node.get("subtitle"):
+            name = node.get("subtitle", "")
+        elif node.get("nameLocalized", {}).get("localizedStringWithTranslationPreference"):
+            name = node["nameLocalized"]["localizedStringWithTranslationPreference"]
+
+        # === PRICE ===
+        price = 0.0
+        price_struct = node.get("structuredDisplayPrice", {})
+        primary = price_struct.get("primaryLine", {})
+        
+        if primary.get("discountedPrice"):
+            price_str = primary["discountedPrice"].replace("$", "").replace(",", "")
+            price = float(price_str)
+        elif primary.get("price"):
+            price_str = primary["price"].replace("$", "").replace(",", "")
+            price = float(price_str)
+
+        # === COORDINATES ===
+        lat = 0.0
+        lon = 0.0
+        loc = dsl.get("location", {}).get("coordinate", {})
+        if loc:
+            lat = float(loc.get("latitude", 0))
+            lon = float(loc.get("longitude", 0))
+
+        distance_km = haversine_km(origin_lat, origin_lon, lat, lon) if lat and lon else 0.0
+
+        # === RATING & REVIEWS - FIXED 2026 ===
+        rating = 0.0
+        review_count = 0
+
+        # Cách 1: Từ avgRatingA11yLabel (rất ổn định)
+        a11y = node.get("avgRatingA11yLabel") or ""
+        if a11y:
+            m = re.search(r'([\d.]+)\s*out of 5', a11y)
+            if m:
+                rating = float(m.group(1))
+            m2 = re.search(r',\s*(\d+)\s*reviews?', a11y)
+            if m2:
+                review_count = int(m2.group(1))
+
+        # Cách 2: Fallback từ avgRatingLocalized
+        if rating == 0 or review_count == 0:
+            localized = node.get("avgRatingLocalized") or ""
+            if localized:
+                m = re.search(r'([\d.]+)\s*\((\d+)\)', localized)
+                if m:
+                    rating = float(m.group(1))
+                    review_count = int(m.group(2))
+
+        # === BEDROOMS / BEDS ===
+        bedrooms = 0
+        beds = 0
+        for line in (node.get("structuredContent", {}).get("primaryLine", []) or []):
+            body = line.get("body", "")
+            if "bedroom" in body.lower():
+                m = re.search(r'(\d+)', body)
+                if m:
+                    bedrooms = int(m.group(1))
+            elif "bed" in body.lower() and "bedroom" not in body.lower():
+                m = re.search(r'(\d+)', body)
+                if m:
+                    beds = int(m.group(1))
+
+        # Room type
+        room_type = node.get("title", "").lower()
+        if "entire" in room_type or "home" in room_type or "house" in room_type or "apt" in room_type:
+            room_type = "Entire home"
+        elif "private" in room_type:
+            room_type = "Private room"
+        else:
+            room_type = "Entire home"  # default
+
+        comp = Competitor(
+            id=listing_id,
+            name=name.strip() or "Unknown Listing",
+            url=f"https://www.airbnb.com/rooms/{listing_id}" if listing_id else "",
+            price_per_night=price,
+            currency=currency,
+            latitude=lat,
+            longitude=lon,
+            distance_km=round(distance_km, 2),
+            city=resolve_city("", ""),  # sẽ update sau nếu cần
+            bedrooms=bedrooms,
+            beds=beds,
+            rating=rating,
+            review_count=review_count,
+            is_superhost=any(b.get("text") == "Superhost" for b in node.get("badges", [])),
+            badge="Superhost" if any(b.get("text") == "Superhost" for b in node.get("badges", [])) else "",
+            room_type=room_type,
+            max_guests=0,  # chưa có data tốt
+        )
+
+        return comp
+
+    except Exception as e:
+        log.warning(f"Failed to parse node: {e}")
         return None
-
-    coord = (dsl.get("location") or {}).get("coordinate") or {}
-    lat = float(coord.get("latitude", 0))
-    lon = float(coord.get("longitude", 0))
-    dist = round(haversine_km(origin_lat, origin_lon, lat, lon), 2) if lat and lon else -1.0
-
-    sdp  = node.get("structuredDisplayPrice") or {}
-    pl   = (sdp.get("primaryLine") or {})
-    ps   = pl.get("price", "") or pl.get("accessibilityLabel", "")
-    price = 0.0
-    if ps:
-        pm = re.search(r"[\$₫]?([\d,]+)", ps.replace(",",""))
-        if pm:
-            price = float(pm.group(1).replace(",",""))
-
-    loc = node.get("avgRatingLocalized", "") or ""
-    lm  = re.match(r"([\d.]+)\s*\((\d+)\)", loc)
-    rating  = float(lm.group(1)) if lm else 0.0
-    reviews = int(lm.group(2))   if lm else 0
-
-    is_superhost, badge = False, ""
-    for b in (node.get("badges") or []):
-        btype = ((b.get("loggingContext") or {}).get("badgeType") or "").upper()
-        text  = (b.get("text") or "").lower()
-        if btype == "SUPERHOST" or "superhost" in text:
-            is_superhost = True
-        elif btype == "GUEST_FAVORITE" or "guest fav" in text:
-            badge = "Guest favourite"
-        elif btype == "RARE_FIND" or "rare find" in text:
-            badge = "Rare find"
-
-    bedrooms, beds = 0, 0
-    sc = node.get("structuredContent") or {}
-    for item in (sc.get("primaryLine") or []) + (sc.get("mapPrimaryLine") or []):
-        body = item.get("body", "") or ""
-        if "bedroom" in body:
-            bm = re.search(r"(\d+)", body)
-            if bm: bedrooms = int(bm.group(1))
-        elif "bed" in body:
-            bm = re.search(r"(\d+)", body)
-            if bm: beds = int(bm.group(1))
-
-    city = ""
-    title = node.get("title", "") or ""
-    tm = re.search(r" in (.+)$", title)
-    if tm: city = tm.group(1)
-
-    occ = min((reviews / 0.72 * 3) / 365, 1.0) if reviews > 0 else 0.0
-
-    return Competitor(
-        id=str(lid), name=name, url=f"https://www.airbnb.com/rooms/{lid}" if lid else "",
-        price_per_night=price, currency=currency,
-        latitude=lat, longitude=lon, distance_km=dist, city=city,
-        bedrooms=bedrooms, beds=beds, rating=rating, review_count=reviews,
-        is_superhost=is_superhost, badge=badge, estimated_occupancy=round(occ, 2),
-    )
 
 
 def stage_d_retrieve_candidates(
@@ -752,14 +866,14 @@ def stage_d_retrieve_candidates(
 # ══════════════════════════════════════════════════════════════
 
 SIMILARITY_WEIGHTS = {
-    "distance":       0.25,
-    "room_type":      0.20,
-    "bedrooms":       0.20,
-    "guests":         0.10,
-    "rating":         0.10,
-    "reviews":        0.07,
-    "superhost":      0.05,
-    "badge":          0.03,
+    "distance":   0.25,   # geography is still primary
+    "room_type":  0.15,   # reduced — search already filters by room type
+    "bedrooms":   0.22,   # increased — strongest structural signal
+    "guests":     0.10,
+    "rating":     0.12,   # increased — quality signal matters for pricing
+    "reviews":    0.08,   # increased — market presence / trust
+    "superhost":  0.05,
+    "badge":      0.03,
 }
 
 def _score_distance(dist_km: float, radius_km: float) -> float:
@@ -776,14 +890,56 @@ def _score_bedrooms(comp_br: int, target_br: int) -> float:
     return 0.0
 
 def _score_rating(comp_r: float, target_r: float) -> float:
-    if target_r == 0: return 0.5
-    diff = abs(comp_r - target_r)
-    return max(0, 1.0 - diff * 2)
+    """
+    Score comp rating as an ABSOLUTE quality signal.
+    We want high-rated comps regardless of the listing's own rating.
+    (A new listing with rating=0 should not penalise all comps equally.)
+    """
+    if comp_r == 0:    return 0.25   # unreviewed — low confidence
+    if comp_r >= 4.85: return 1.00
+    if comp_r >= 4.70: return 0.88
+    if comp_r >= 4.50: return 0.72
+    if comp_r >= 4.00: return 0.50
+    return 0.30
 
 def _score_reviews(comp_rev: int, target_rev: int) -> float:
-    if target_rev == 0: return 0.5
-    ratio = min(comp_rev, target_rev) / max(comp_rev, target_rev, 1)
-    return ratio
+    """
+    Score comp review count as market presence / credibility signal.
+    More reviews = more established = better pricing reference.
+    Target listing's review count is irrelevant here (especially when new).
+    """
+    if comp_rev == 0:   return 0.20   # no reviews — unreliable data point
+    if comp_rev < 5:    return 0.40
+    if comp_rev < 15:   return 0.58
+    if comp_rev < 30:   return 0.70
+    if comp_rev < 60:   return 0.82
+    if comp_rev < 120:  return 0.92
+    return 1.00
+
+
+def _score_room_type(comp_type: str, target_type: str) -> float:
+    """Compare actual room types — exact match required for direct comp."""
+    def _norm(t: str) -> str:
+        t = (t or "").lower()
+        if "entire" in t or "whole" in t: return "entire"
+        if "private" in t:                return "private"
+        if "shared" in t:                 return "shared"
+        return t.strip()
+    ct, tt = _norm(comp_type), _norm(target_type)
+    if not ct or not tt: return 0.60   # unknown — neutral
+    if ct == tt:         return 1.00   # exact match
+    return 0.15                         # different type — strong penalisation
+
+
+def _score_guests(comp_g: int, target_g: int) -> float:
+    """Score guest capacity match."""
+    if target_g == 0 or comp_g == 0: return 0.60   # unknown — neutral
+    diff = abs(comp_g - target_g)
+    if diff == 0: return 1.00
+    if diff == 1: return 0.85
+    if diff == 2: return 0.60
+    if diff <= 4: return 0.35
+    return 0.10
 
 def stage_e_similarity(
     comps: List[Competitor],
@@ -796,10 +952,12 @@ def stage_e_similarity(
 
     for comp in comps:
         breakdown = {}
-        breakdown["distance"] = _score_distance(comp.distance_km, req.radius_km)
-        breakdown["room_type"] = 1.0 if comp.city == listing.city else 0.5  # proxy
+        breakdown["distance"]  = _score_distance(comp.distance_km, req.radius_km)
+        breakdown["room_type"] = _score_room_type(
+            getattr(comp, "room_type", ""), listing.room_type)
         breakdown["bedrooms"]  = _score_bedrooms(comp.bedrooms, listing.bedrooms)
-        breakdown["guests"]    = 1.0 if listing.max_guests == 0 else max(0, 1 - abs(0) / 4)
+        breakdown["guests"]    = _score_guests(
+            getattr(comp, "max_guests", 0), listing.max_guests)
         breakdown["rating"]    = _score_rating(comp.rating, listing.rating)
         breakdown["reviews"]   = _score_reviews(comp.review_count, listing.review_count)
         breakdown["superhost"] = 1.0 if comp.is_superhost == listing.is_superhost else 0.5
@@ -1668,13 +1826,41 @@ def stage_b_extract_listing_patched(req, listing_profile_class, dig_fn):
                 if k not in raw or not raw.get(k):
                     raw[k] = v
 
-            # Rating from page if not in JSON
+            # ── Name: multiple DOM strategies ──
+            if not raw.get("name"):
+                for sel in ["h1", "h1._14i3z6h", "[data-testid=listing-title]",
+                            "[data-section-id=TITLE_DEFAULT] h1"]:
+                    el = page.query_selector(sel)
+                    if el:
+                        txt = el.inner_text().strip()
+                        if len(txt) > 3:
+                            raw["name"] = txt; break
+
+            # og:title fallback for name
+            if not raw.get("name"):
+                m_og = _re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', html)
+                if m_og:
+                    title = m_og.group(1).split(" | ")[0].strip()
+                    if len(title) > 3: raw["name"] = title
+
+            # ── Coords: try JSON embedded in page scripts ──
+            if not raw.get("latitude"):
+                coord_m = _re.search(
+                    r'"coordinate"\s*:\s*\{"[^}]*"latitude"\s*:\s*([\d.\-]+)[^}]*"longitude"\s*:\s*([\d.\-]+)',
+                    html)
+                if coord_m:
+                    raw["latitude"]  = float(coord_m.group(1))
+                    raw["longitude"] = float(coord_m.group(2))
+
+            # ── Rating from page ──
             if not raw.get("starRating"):
-                rating_el = page.query_selector("span[aria-label*='rating'], span[aria-label*='star']")
-                if rating_el:
-                    aria = rating_el.get_attribute("aria-label") or ""
-                    rm = _re.search(r"([\d.]+)", aria)
-                    if rm: raw["starRating"] = float(rm.group(1))
+                for rsel in ["span[aria-label*='rating']","span[aria-label*='star']",
+                             "[data-testid=pdp-rating-hero-bar]"]:
+                    rating_el = page.query_selector(rsel)
+                    if rating_el:
+                        aria = rating_el.get_attribute("aria-label") or ""
+                        rm = _re.search(r"([\d.]+)", aria)
+                        if rm: raw["starRating"] = float(rm.group(1)); break
 
             browser.close()
 
@@ -2634,7 +2820,7 @@ def run_pipeline_patched(
         "date_samples":  [s.__dict__ for s in date_samples],
         "date_summary":  date_summary,
         "sample_days":   [s.__dict__ for s in sample_days],
-        "comps":         [c.__dict__ for c in comps[:30]],
+        "comps":         [{**c.__dict__, "tier": c.tier.value if hasattr(c.tier, 'value') else str(c.tier)} for c in comps],
         "ai_strategy":   ai_strategy,
         "confidence":    ai_strategy.get("confidence", "medium"),
         "generated_at":  datetime.datetime.now().isoformat(),
@@ -3238,7 +3424,7 @@ if __name__ == "__main__":
     your_rate = float(rate_s.replace(",","")) if rate_s else 0.0
 
     from pathlib import Path
-    out_dir = Path.home() / "openclaw" / "airbnb" / "strategy"
+    out_dir = current_dir / "strategy"
 
     result = run_pipeline_patched(
         listing_url=url,

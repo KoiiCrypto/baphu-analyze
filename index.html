@@ -209,6 +209,52 @@ a{color:inherit;text-decoration:none}a:hover{color:var(--gold2)}
 /* ── Section label ── */
 .sec-lbl{font-size:10px;font-weight:500;color:var(--txt3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:8px}
 .sec-lbl::after{content:'';flex:1;height:1px;background:var(--bdr)}
+
+/* ── Mobile / Responsive ─────────────────────────────────────── */
+@media (max-width: 768px) {
+  .body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .panel-left {
+    border-right: none;
+    border-bottom: 1px solid var(--bdr);
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+  .panel-right { min-height: 0; }
+  .tab-bar { padding: 0 12px; }
+  .tab { padding: 10px 12px; font-size: 12px; }
+  .tab-body { padding: 14px; }
+  .left-scroll { padding: 12px; gap: 10px; }
+  .stat-row { grid-template-columns: repeat(2, 1fr); }
+  .month-row { grid-template-columns: 1fr; }
+  .price-rec-grid { grid-template-columns: repeat(3, 1fr); }
+  .params-grid { grid-template-columns: 1fr; }
+  .cal-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); min-width: unset; }
+  .cal-day { padding: 3px 4px; min-height: 44px; }
+  .day-p { font-size: 11px; }
+  .day-t { display: none; }
+  .tbl-wrap { font-size: 11px; }
+  th, td { padding: 6px 8px; }
+  .opp { flex-direction: column; gap: 6px; }
+  .pos-banner { flex-direction: column; gap: 8px; }
+  .pos-pct { font-size: 22px; }
+  header { padding: 0 12px; gap: 8px; }
+  .logo em { display: none; }
+  .key-pill { display: none; }
+  .hdr-right { gap: 6px; }
+  .report-pre, .prompt-pre { font-size: 11px; padding: 12px; }
+  .btn-full { padding: 10px 14px; }
+}
+
+@media (max-width: 480px) {
+  .stat-row { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .price-rec-grid { grid-template-columns: repeat(2, 1fr); }
+  .dl-row { gap: 5px; }
+  .dl-row .btn { font-size: 11px; padding: 5px 8px; }
+  .cal-day { padding: 2px 3px; min-height: 36px; }
+  .day-n { font-size: 9px; }
+  .day-p { font-size: 10px; }
+  .tab .badge { display: none; }
+}
 </style>
 </head>
 <body>
@@ -534,18 +580,66 @@ async function loadKeyStatus(){
 async function reloadKeys(){
   const btn=$('reloadKeyBtn'),ico=$('reloadKeyIco');
   btn.disabled=true; ico.innerHTML='<span class="spin"></span>';
-  addLog('Intercepting Airbnb API keys via browser…','info');
+  addLog('Intercepting Airbnb API keys via browser (10–15s)…','info');
   try{
     const d=await(await api('/api/reload-keys',{method:'POST'})).json();
     if(d.success){
-      addLog(`Keys refreshed ✓ — ${d.api_key.slice(0,12)}…`,'done');
-      $('keyPill').className='key-pill key-live';
-      $('keyPill').textContent=`✓ live: ${d.api_key.slice(0,12)}… · ${d.updated_at?.slice(11,19)||''}`;
+      applyKeySuccess(d.api_key, d.updated_at, 'live');
+      addLog('Keys refreshed ✓ — '+d.api_key.slice(0,12)+'…','done');
     } else {
-      addLog('Key reload failed: '+d.error,'err');
+      addLog('Auto-reload failed: '+d.error+' — use manual input below','warn');
+      showManualKeyInput();
     }
-  }catch(e){ addLog('Key reload error: '+e,'err'); }
+  }catch(e){
+    addLog('Auto-reload error: '+e+' — use manual input below','warn');
+    showManualKeyInput();
+  }
   btn.disabled=false; ico.textContent='⟳';
+}
+
+function applyKeySuccess(apiKey, updatedAt, source){
+  $('keyPill').className='key-pill key-live';
+  $('keyPill').textContent='✓ '+source+': '+apiKey.slice(0,12)+'… · '+(updatedAt||'').slice(11,19);
+}
+
+function showManualKeyInput(){
+  if($('manualKeyModal')) return;
+  const modal = document.createElement('div');
+  modal.id='manualKeyModal';
+  modal.style.cssText='position:fixed;inset:0;background:#0008;display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px';
+  modal.innerHTML=`
+    <div style="background:var(--bg2);border:1px solid var(--bdr);border-radius:var(--r2);padding:24px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:12px">
+      <div style="font-family:var(--serif);font-size:16px;color:var(--gold2)">Manual Key Update</div>
+      <div style="font-size:12px;color:var(--txt2)">Get from DevTools → Network → filter <code style='color:var(--amb)'>StaysSearch</code> → copy from request headers &amp; URL</div>
+      <div class="field"><label>X-Airbnb-API-Key (from request headers)</label>
+        <input id="mkApiKey" type="text" placeholder="d306zoyjsyarp7ifhu67rjxn52tv0t20"></div>
+      <div class="field"><label>SHA-256 Hash (from URL after /StaysSearch/)</label>
+        <input id="mkHash" type="text" placeholder="48738417b534264d…"></div>
+      <div id="mkErr" style="font-size:12px;color:var(--red);display:none"></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="submitManualKeys()">Update Keys</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('manualKeyModal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+async function submitManualKeys(){
+  const apiKey=($('mkApiKey').value||'').trim();
+  const hash=($('mkHash').value||'').trim();
+  const err=$('mkErr');
+  if(apiKey.length < 20){ err.style.display='block'; err.textContent='API key too short'; return; }
+  if(hash.length < 40){ err.style.display='block'; err.textContent='Hash too short (need 40+ hex chars)'; return; }
+  try{
+    const d=await(await api('/api/update-keys',{method:'POST',body:JSON.stringify({api_key:apiKey,hash})})).json();
+    if(d.success){
+      applyKeySuccess(d.api_key, d.updated_at, 'manual');
+      addLog('Manual keys applied ✓','done');
+      $('manualKeyModal').remove();
+    } else {
+      err.style.display='block'; err.textContent=d.error;
+    }
+  }catch(e){ err.style.display='block'; err.textContent='Error: '+e; }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -823,8 +917,10 @@ async function renderOverview(s){
 // ═══════════════════════════════════════════════════════════════
 async function loadAndRenderCalendar(){
   try{
-    const d=await(await api('/api/file-content/price_calendar.csv')).json();
-    if(!d.content) return;
+    const r = await api('/api/file-content/price_calendar.csv');
+    const d = await r.json();
+    if(d.error){ addLog('Calendar: '+d.error,'warn'); return; }
+    if(!d.content){ addLog('Calendar: empty response','warn'); return; }
     const rows=d.content.trim().split('\n').slice(1).map(line=>{
       const c=line.split(',');
       return {date:c[0],day_name:c[1],day_type:c[2],month:c[3],
@@ -937,7 +1033,7 @@ async function copyPrompt(){
 // ═══════════════════════════════════════════════════════════════
 // DOWNLOAD
 // ═══════════════════════════════════════════════════════════════
-function dl(filename){ window.open('/api/download/'+encodeURIComponent(filename),'_blank'); }
+function dl(filename){ window.open('/api/download/'+encodeURIComponent(filename)+'?sid='+getSessionId(),'_blank'); }
 
 // ═══════════════════════════════════════════════════════════════
 // INIT — clean startup, no old files
